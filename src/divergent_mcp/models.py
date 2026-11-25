@@ -22,7 +22,11 @@ FAMILIES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "openai": (("openai/gpt-6.1-terra",), ("openai/gpt-6.2-sol",)),
     "deepseek": (("deepseek/deepseek-v4.1-flash",), ("deepseek/deepseek-v4-pro",)),
     "qwen": (("qwen/qwen3.8-flash",), ("qwen/qwen4-max",)),
-    "mistralai": (("mistralai/mistral-small-2603",), ("mistralai/mistral-large-4-0",)),
+    # mistral-large-4-0 reasons on every call and cannot be turned down: 30-110 s per batch.
+    "mistralai": (
+        ("mistralai/mistral-small-2603",),
+        ("mistralai/mistral-medium-3-5", "mistralai/mistral-large-2512"),
+    ),
     "meta-llama": (("meta-llama/llama-4-maverick",), ()),
     "z-ai": (("z-ai/glm-5.3-flash",), ()),
     "cohere": (("cohere/command-a-plus",), ()),

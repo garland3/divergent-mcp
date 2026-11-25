@@ -29,7 +29,7 @@ DEFAULT_DEADLINE_S = 90.0
 DEFAULT_EMBEDDING_MODEL = "perplexity/pplx-embed-v1-0.6b"
 CONCURRENCY = 16
 # After this many seconds, stop waiting once this share of generation calls is back.
-SOFT_GENERATION_S = 25.0
+SOFT_GENERATION_S = {"low": 25.0, "medium": 35.0, "high": 45.0}  # premium models are slower
 GENERATION_QUORUM = 0.6
 
 # Duplicate thresholds, tuned on real runs with the default embedding model: paraphrases
@@ -315,22 +315,33 @@ async def _gather_until(
     return bool(pending)
 
 
+LOW_EFFORT = {"effort": "low"}
+
+
 async def _chat(
     client: OpenRouterClient, model: ModelSpec, messages: list[dict[str, str]], params: dict[str, Any]
 ):
-    """One chat call. A 400 is retried once with nothing but max_tokens.
+    """One chat call, with fallbacks when the provider rejects the request (HTTP 400).
 
-    The catalogue's capability data is occasionally wrong (a listed reasoning effort
-    or sampling parameter the provider then rejects), and a plain request is better
-    than losing the model.
+    The catalogue's capability data is occasionally wrong: a listed reasoning effort
+    or sampling parameter that the provider then refuses. First retry with low
+    reasoning effort, which nearly every reasoning model accepts and which keeps the
+    call fast; then with nothing but max_tokens. A plain request is better than
+    losing the model.
     """
-    try:
-        return await client.chat(model.id, messages, **params)
-    except OpenRouterError as exc:
-        bare = {k: v for k, v in params.items() if k == "max_tokens"}
-        if "HTTP 400" not in str(exc) or bare == params:
-            raise
-        return await client.chat(model.id, messages, **bare)
+    attempts = [params]
+    if "reasoning" in params and params["reasoning"] != LOW_EFFORT:
+        attempts.append({**params, "reasoning": LOW_EFFORT})
+    bare = {k: v for k, v in params.items() if k == "max_tokens"}
+    if bare != params:
+        attempts.append(bare)
+    for i, attempt in enumerate(attempts):
+        try:
+            return await client.chat(model.id, messages, **attempt)
+        except OpenRouterError as exc:
+            if "HTTP 400" not in str(exc) or i == len(attempts) - 1:
+                raise
+    raise AssertionError("unreachable")
 
 
 async def _pool_for(
@@ -447,7 +458,7 @@ async def _run(
     gen_budget = total * (0.6 if req.judge else 0.85)
     tasks = [asyncio.create_task(generate(c)) for c in plan]
     deadline_hit = await _gather_until(
-        tasks, gen_budget, soft=min(SOFT_GENERATION_S, gen_budget), quorum=GENERATION_QUORUM
+        tasks, gen_budget, soft=min(SOFT_GENERATION_S[req.budget], gen_budget), quorum=GENERATION_QUORUM
     )
     for entry in trace:
         if "ok" not in entry:

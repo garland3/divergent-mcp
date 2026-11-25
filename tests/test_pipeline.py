@@ -66,22 +66,40 @@ async def test_failed_and_unparsable_calls_are_tolerated(fake, client):
     assert any("HTTP 400" in e for e in errors) and any("no parsable ideas" in e for e in errors)
 
 
-async def test_a_rejected_parameter_is_retried_as_a_plain_request(client):
-    bodies = []
-
+def _one_idea_handler(bodies, reject):
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            entry = {"id": "x/y", "supported_parameters": ["temperature", "reasoning"], "reasoning": {"supported_efforts": ["high", "none"]}}
+            return httpx.Response(200, json={"data": [entry]})
         body = json.loads(request.content)
         bodies.append(body)
-        if "reasoning" in body or "temperature" in body:
+        if reject(body):
             return httpx.Response(400, json={"error": {"message": "Provider returned error"}})
         text = json.dumps({"ideas": [{"title": "One", "idea": "Only idea."}]})
         return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
 
+    return handler
+
+
+async def test_a_rejected_reasoning_effort_is_retried_at_low_effort():
+    # The catalogue says "none" is allowed; the provider disagrees.
+    bodies = []
+    handler = _one_idea_handler(bodies, lambda b: b.get("reasoning") == {"effort": "none"})
     async with OpenRouterClient(FAKE_KEY, transport=httpx.MockTransport(handler), max_retries=0) as c:
-        c._catalogue = client._catalogue = None
         req = IdeationRequest("t", n=1, models=["x/y"], max_calls=1, judge=False, embeddings=False)
         result = await ideate(req, c)
-    assert result["returned"] == 1 and result["stats"]["calls_ok"] == 1
+    assert result["stats"]["calls_ok"] == 1 and len(bodies) == 2
+    assert bodies[0]["reasoning"] == {"effort": "none"} and bodies[1]["reasoning"] == {"effort": "low"}
+    assert bodies[1]["temperature"] == bodies[0]["temperature"]  # sampling jitter is kept
+
+
+async def test_a_request_rejected_twice_is_retried_plain():
+    bodies = []
+    handler = _one_idea_handler(bodies, lambda b: "reasoning" in b or "temperature" in b)
+    async with OpenRouterClient(FAKE_KEY, transport=httpx.MockTransport(handler), max_retries=0) as c:
+        req = IdeationRequest("t", n=1, models=["x/y"], max_calls=1, judge=False, embeddings=False)
+        result = await ideate(req, c)
+    assert result["returned"] == 1 and len(bodies) == 3
     assert set(bodies[-1]) == {"model", "messages", "max_tokens"}
 
 

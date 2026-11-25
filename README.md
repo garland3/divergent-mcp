@@ -66,8 +66,10 @@ from 0 to 1 and the model and lens that produced it. The last line reports calls
 families, raw and unique idea counts, cost and time.
 
 A `low` run for 8 ideas makes 6 generation calls, one embeddings call and one judge
-call, takes roughly 15-25 seconds and costs about one cent. `high` uses premium models
-and costs 10-20 times that.
+call, takes roughly 15-25 seconds and costs about one cent. `medium` and `high` use
+premium models, take 30-60 seconds and cost around five cents for 8 ideas, more as `n`
+grows. The reported cost covers completed calls only; a call cancelled for being too slow
+may still be billed by the provider.
 
 ## MCP server
 
@@ -126,9 +128,9 @@ lenses in proportion to their weight at the chosen spice level.
 **Fan out.** All calls run concurrently. Sampling parameters are fitted to what each
 model accepts according to the OpenRouter catalogue, and reasoning is turned down as far
 as each model allows (left at default, some small models spend the whole token budget
-thinking). A call rejected with HTTP 400 is retried once as a plain request. After 25
-seconds the run stops waiting once 60% of calls are back, so one slow model does not hold
-it. Replies are parsed forgivingly: code fences, surrounding prose and partly broken JSON
+thinking). A call rejected with HTTP 400 is retried at low reasoning effort, then as a plain request. After 25
+to 45 seconds, depending on budget, the run stops waiting once 60% of calls are back, so
+one slow model does not hold it. Replies are parsed forgivingly: code fences, surrounding prose and partly broken JSON
 are all handled.
 
 **Dedup.** Ideas are embedded through OpenRouter and compared by cosine after
@@ -174,7 +176,7 @@ general-purpose model from the same vendor within the tier's price cap is used i
 
 ```bash
 uv sync --extra dev
-uv run pytest -q            # 51 tests against a fake OpenRouter; no network, no key
+uv run pytest -q            # 52 tests against a fake OpenRouter; no network, no key
 uv run ruff check .
 
 # Optional live smoke test, well under one cent:
